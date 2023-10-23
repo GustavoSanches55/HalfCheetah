@@ -1,117 +1,131 @@
-import copy
-import numpy as np
-import torch
-import torch.nn as nn
+import torch 
+import torch.nn as nn 
 import torch.nn.functional as F
+import numpy as np 
+import os
 
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Implementation of Deep Deterministic Policy Gradients (DDPG)
-# Paper: https://arxiv.org/abs/1509.02971
-# [Not the implementation used in the TD3 paper]
-
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 class Actor(nn.Module):
-	def __init__(self, state_dim, action_dim, max_action):
-		super(Actor, self).__init__()
 
-		self.l1 = nn.Linear(state_dim, 400)
-		self.l2 = nn.Linear(400, 300)
-		self.l3 = nn.Linear(300, action_dim)
-		
-		self.max_action = max_action
+    def __init__(self, state_space, action_space):
+        
+        super(Actor, self).__init__()
+        self.fc1 = nn.Linear(state_space, 128)
+        self.fc2 = nn.Linear(128, 300)
+        self.fc3 = nn.Linear(300, 400)
+        self.fc4 = nn.Linear(400, action_space)
+        nn.init.uniform_(self.fc4.weight, -3*1e-3, 3*1e-3) 
+        
+        self.b1 = nn.BatchNorm1d(128)
+        self.b2 = nn.BatchNorm1d(300)
+        self.b3 = nn.BatchNorm1d(400)
 
-	
-	def forward(self, state):
-		a = F.relu(self.l1(state))
-		a = F.relu(self.l2(a))
-		return self.max_action * torch.tanh(self.l3(a))
+    def forward(self, x):
 
+        x = self.b1(F.relu(self.fc1(x)))
+        x = self.b2(F.relu(self.fc2(x)))
+        x = self.b3(F.relu(self.fc3(x)))
+        return F.tanh(self.fc4(x))
 
 class Critic(nn.Module):
-	def __init__(self, state_dim, action_dim):
-		super(Critic, self).__init__()
 
-		self.l1 = nn.Linear(state_dim, 400)
-		self.l2 = nn.Linear(400 + action_dim, 300)
-		self.l3 = nn.Linear(300, 1)
+    def __init__(self, state_space, action_space):
+        
+        super(Critic, self).__init__()
+        self.fc1 = nn.Linear(state_space, 128)
+        self.fcA1 = nn.Linear(action_space, 256)
+        self.fcS1 = nn.Linear(128, 256)
+        self.fc2 = nn.Linear(256, 300)
+        self.fc3 = nn.Linear(300, 400)
+        self.fc4 = nn.Linear(400, 1)
+        
+        self.b1 = nn.BatchNorm1d(128)
+        self.b2 = nn.BatchNorm1d(256)
 
+    def forward(self, state, action):
+        
+        x = self.b1(F.relu(self.fc1(state)))
+        aOut = self.fcA1(F.relu(action))
+        sOut = self.b2(F.relu(self.fcS1(x)))
+        comb = F.relu(aOut+sOut)
+        out = F.relu(self.fc2(comb))
+        out = F.relu(self.fc3(out))
+        out = self.fc4(out)
+        return out
 
-	def forward(self, state, action):
-		q = F.relu(self.l1(state))
-		q = F.relu(self.l2(torch.cat([q, action], 1)))
-		return self.l3(q)
+class DDPG():
 
+    def __init__(self, state_space, action_space):
+       
+        self.exploreDistr = torch.distributions.normal.Normal(\
+        torch.zeros(action_space), torch.ones(action_space))
+        self.actor = Actor(state_space, action_space).to(device)
+        self.critic = Critic(state_space, action_space).to(device)
+        self.targActor = Actor(state_space, action_space).to(device)
+        self.targCritic = Critic(state_space, action_space).to(device)
+        self.actorOpt = torch.optim.Adam(self.actor.parameters(), lr=1e-3, weight_decay=0.005)
+        self.criticOpt = torch.optim.Adam(self.critic.parameters(), lr=1e-2, weight_decay=0.005)
+        self.loss = nn.MSELoss()
+        self.gamma = 0.99
+        self.rho = 0.001
 
-class DDPG(object):
-	def __init__(self, state_dim, action_dim, max_action, discount=0.99, tau=0.001):
-		self.actor = Actor(state_dim, action_dim, max_action).to(device)
-		self.actor_target = copy.deepcopy(self.actor)
-		self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=1e-4)
+    def predict(self, state, test=True):
+        if test: #  Unneeded- currently a hack to maintain consistent inputs with SAC 
+            self.actor.eval()
+        state = torch.from_numpy(state).float().to(device)
+        pred = self.actor(state).detach()
+        pred += 0.1*self.exploreDistr.sample().to(device)
+        return pred.cpu().numpy()[0]
 
-		self.critic = Critic(state_dim, action_dim).to(device)
-		self.critic_target = copy.deepcopy(self.critic)
-		self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), weight_decay=1e-2)
+    def train_step(self, replay, batch_count):
+        
+        #  Set actor to train mode
+        self.actor.train()
+        self.criticOpt.zero_grad()
+        batch_sample = replay.sample(batch_count)
+        state, action, reward, new_state, done = batch_sample
+        state = torch.from_numpy(state).float().to(device)
+        action = torch.from_numpy(action).float().to(device)
+        reward = torch.from_numpy(reward).float().to(device)
+        new_state = torch.from_numpy(new_state).float().to(device)
+        done = torch.from_numpy(done).float().to(device)
+        target = torch.unsqueeze(reward, 1)+torch.unsqueeze((1-done), 1)*self.gamma*(self.targCritic(new_state, self.targActor(new_state)))
+        critic_loss = self.loss(target.detach(), self.critic(state, action))
+        critic_loss.backward()
+        self.criticOpt.step()
 
-		self.discount = discount
-		self.tau = tau
+        self.actorOpt.zero_grad()
+        policyLoss = -self.critic(state, self.actor(state)).mean()
+        policyLoss.backward()
+        self.actorOpt.step()
+        self._update_target()
 
+    def _update_target(self):
+        for param1, param2 in zip(self.targActor.parameters(), self.actor.parameters()):
+            param1.data *= (1-self.rho)
+            param1.data += self.rho*param2.data
+        for param1, param2 in zip(self.targCritic.parameters(), self.critic.parameters()):
+            param1.data *= (1-self.rho)
+            param1.data += self.rho*param2.data
 
-	def select_action(self, state):
-		state = torch.FloatTensor(state.reshape(1, -1)).to(device)
-		return self.actor(state).cpu().data.numpy().flatten()
+    def save(self, path='models/DDPG'):
+        
+        if 'models' in path and os.path.isdir('models') is False:
+            os.mkdir('models')
+        torch.save({'actor_weights': self.actor.state_dict(),
+                    'critic_weights': self.critic.state_dict(),
+                    'Coptimizer_param': self.criticOpt.state_dict(),
+                    'Aoptimizer_param': self.actorOpt.state_dict()
+                    }, path)
+        print("Saved Model Weights!")
 
+    def load(self, path='models/DDPG'):
+        
+        model_dict = torch.load(path)
+        self.actor.load_state_dict(model_dict['actor_weights'])
+        self.critic.load_state_dict(model_dict['critic_weights'])
+        self.criticOpt.load_state_dict(model_dict['Coptimizer_param'])
+        self.actorOpt.load_state_dict(model_dict['Aoptimizer_param'])
+        print("Model Weights Loaded!")
 
-	def train(self, replay_buffer, batch_size=64):
-		# Sample replay buffer 
-		state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
-
-		# Compute the target Q value
-		target_Q = self.critic_target(next_state, self.actor_target(next_state))
-		target_Q = reward + (not_done * self.discount * target_Q).detach()
-
-		# Get current Q estimate
-		current_Q = self.critic(state, action)
-
-		# Compute critic loss
-		critic_loss = F.mse_loss(current_Q, target_Q)
-
-		# Optimize the critic
-		self.critic_optimizer.zero_grad()
-		critic_loss.backward()
-		self.critic_optimizer.step()
-
-		# Compute actor loss
-		actor_loss = -self.critic(state, self.actor(state)).mean()
-		
-		# Optimize the actor 
-		self.actor_optimizer.zero_grad()
-		actor_loss.backward()
-		self.actor_optimizer.step()
-
-		# Update the frozen target models
-		for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-			target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-
-		for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-			target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-
-
-	def save(self, filename):
-		torch.save(self.critic.state_dict(), filename + "_critic")
-		torch.save(self.critic_optimizer.state_dict(), filename + "_critic_optimizer")
-		
-		torch.save(self.actor.state_dict(), filename + "_actor")
-		torch.save(self.actor_optimizer.state_dict(), filename + "_actor_optimizer")
-
-
-	def load(self, filename):
-		self.critic.load_state_dict(torch.load(filename + "_critic"))
-		self.critic_optimizer.load_state_dict(torch.load(filename + "_critic_optimizer"))
-		self.critic_target = copy.deepcopy(self.critic)
-
-		self.actor.load_state_dict(torch.load(filename + "_actor"))
-		self.actor_optimizer.load_state_dict(torch.load(filename + "_actor_optimizer"))
-		self.actor_target = copy.deepcopy(self.actor)
-		
