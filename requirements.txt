@@ -1,0 +1,7 @@
+gym[mujoco]
+mujoco-py
+torch
+numpy
+pandas
+seaborn
+matplotlib
