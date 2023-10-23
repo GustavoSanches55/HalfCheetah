@@ -71,7 +71,7 @@ class DDPG():
         self.rho = 0.001
 
     def predict(self, state, test=True):
-        if test: #  Unneeded- currently a hack to maintain consistent inputs with SAC 
+        if test:
             self.actor.eval()
         state = torch.from_numpy(state).float().to(device)
         pred = self.actor(state).detach()
@@ -90,6 +90,7 @@ class DDPG():
         reward = torch.from_numpy(reward).float().to(device)
         new_state = torch.from_numpy(new_state).float().to(device)
         done = torch.from_numpy(done).float().to(device)
+        
         target = torch.unsqueeze(reward, 1)+torch.unsqueeze((1-done), 1)*self.gamma*(self.targCritic(new_state, self.targActor(new_state)))
         critic_loss = self.loss(target.detach(), self.critic(state, action))
         critic_loss.backward()

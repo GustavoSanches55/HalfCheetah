@@ -128,6 +128,7 @@ def main():
         env = gym.make(envName, render_mode="rgb_array")
     action_space = env.action_space.shape[0]
     state_space = env.observation_space.shape[0]
+    
     model = DDPG(state_space, action_space)
     rmemory = ReplayBuffer(int(1e6))
     print("Starting train...")
