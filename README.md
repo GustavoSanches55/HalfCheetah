@@ -1,6 +1,68 @@
 # HalfCheetah
 A repository dedicated for learning Reinforcement learning using the model Half Cheetah
 
+## Installation
+
+First you need to install Mujoco:
+https://www.chenshiyu.top/blog/2019/06/19/Tutorial-Installation-and-Configuration-of-MuJoCo-Gym-Baselines/
+https://github.com/openai/mujoco-py#install-mujoco
+Aqui estão os comandos :
+```bash	
+curl -OL https://www.roboti.us/download/mujoco200_linux.zip
+
+mkdir ~/.mujoco
+cp mujoco200_linux.zip ~/.mujoco
+cd ~/.mujoco
+# extract to ~/.mujoco/mujoco200
+unzip mujoco200_linux.zip
+# renomeando mujo200_linux para mujoco200
+mv mujoco200_linux mujoco200
+
+```
+
+Then you need to download the license key from the site:
+https://www.roboti.us/file/mjkey.txt
+
+```bash
+curl -OL https://www.roboti.us/file/mjkey.txt
+cp mjkey.txt ~/.mujoco
+cp mjkey.txt ~/.mujoco/mujoco200/bin
+```
+
+Adding the path to the .bashrc file:
+```bash
+gedit ~/.bashrc
+
+export LD_LIBRARY_PATH=/home/csy/.mujoco/mujoco200/bin${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+export MUJOCO_KEY_PATH=/home/csy/.mujoco${MUJOCO_KEY_PATH}
+```
+
+You can also thest Mujoco using the following command:
+```bash
+cd ~/.mujoco/mujoco200/bin
+./simulate ../model/humanoid.xml
+```
+Se não encontrar libxcursor, instale com:
+```bash
+sudo apt-get update
+sudo apt-get install libxcursor1
+```
+
+Caso tenha problemas com o teste, no ubuntu pode ser necessário:
+```bash
+sudo apt install libosmesa6-dev libgl1-mesa-glx libglfw3
+```
+
+
+Install the requirements using pip:
+
+```bash
+pip install -r requirements.txt
+```
+
+
+
+## Usage
 To train the model, run train.py.
 There are some possible arguments:
  --model: Name of the file that will be saved with the model. (by default, it is DDPG_cheetah)
