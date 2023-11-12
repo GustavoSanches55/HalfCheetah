@@ -1,6 +1,8 @@
 # HalfCheetah
 A repository dedicated for learning Reinforcement learning using the model Half Cheetah
 
+> A presentation is avaliable [here](./MuJoco%20aprendizado%20por%20reforço.pdf)
+
 ## Installation
 
 First you need to install Mujoco:
