@@ -17,7 +17,6 @@ cp mujoco200_linux.zip ~/.mujoco
 cd ~/.mujoco
 # extract to ~/.mujoco/mujoco200
 unzip mujoco200_linux.zip
-# renomeando mujo200_linux para mujoco200
 mv mujoco200_linux mujoco200
 
 ```
